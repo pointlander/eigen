@@ -27,7 +27,7 @@ func main() {
 	}
 	split := regexp.MustCompile(`[\s]+`)
 	words := split.Split(string(data), -1)
-	words = words[:2048]
+	words = words[:4096]
 	count, unique := 0, make(map[string]int)
 	for _, word := range words {
 		normalized := normalize(word)
