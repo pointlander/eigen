@@ -17,10 +17,11 @@ import (
 	"gonum.org/v1/gonum/mat"
 )
 
+func normalize(a string) string {
+	return strings.ToLower(strings.Trim(a, " \n\r\t.?!,;"))
+}
+
 func main() {
-	normalize := func(a string) string {
-		return strings.ToLower(strings.Trim(a, " \n\r\t.?!,;"))
-	}
 	data, err := ioutil.ReadFile("84-0.txt")
 	if err != nil {
 		panic(err)
@@ -39,41 +40,7 @@ func main() {
 	size := len(unique)
 	fmt.Println(size)
 
-	adjacency := sparse.NewDOK(size, size)
-	for i := 1; i < len(words)-1; i++ {
-		a := normalize(words[i-1])
-		b := normalize(words[i])
-		c := normalize(words[i+1])
-
-		weight := adjacency.At(unique[a], unique[b])
-		weight++
-		adjacency.Set(unique[a], unique[b], weight)
-		adjacency.Set(unique[b], unique[a], weight)
-
-		weight = adjacency.At(unique[c], unique[b])
-		weight++
-		adjacency.Set(unique[c], unique[b], weight)
-		adjacency.Set(unique[b], unique[c], weight)
-	}
-	fmt.Println("loaded adjacency matrix")
-
-	var eig mat.Eigen
-	ok := eig.Factorize(adjacency, mat.EigenRight)
-	if !ok {
-		panic("Eigendecomposition failed")
-	}
-	fmt.Println("computed eigenvectors")
-	for i, value := range eig.Values(nil) {
-		fmt.Println(i, cmplx.Abs(value))
-	}
-	vectors := mat.CDense{}
-	eig.VectorsTo(&vectors)
-	wordVectors := make([][]float64, size)
-	for i := 0; i < size; i++ {
-		for j := 0; j < size; j++ {
-			wordVectors[i] = append(wordVectors[i], cmplx.Abs(vectors.At(i, j)))
-		}
-	}
+	wordVectors := gonum(words, unique)
 
 	type Word struct {
 		Key   string
@@ -121,4 +88,44 @@ func main() {
 	for _, word := range ranked {
 		fmt.Println(word.Key)
 	}
+}
+
+func gonum(words []string, unique map[string]int) [][]float64 {
+	size := len(unique)
+	adjacency := sparse.NewDOK(size, size)
+	for i := 1; i < len(words)-1; i++ {
+		a := normalize(words[i-1])
+		b := normalize(words[i])
+		c := normalize(words[i+1])
+
+		weight := adjacency.At(unique[a], unique[b])
+		weight++
+		adjacency.Set(unique[a], unique[b], weight)
+		adjacency.Set(unique[b], unique[a], weight)
+
+		weight = adjacency.At(unique[c], unique[b])
+		weight++
+		adjacency.Set(unique[c], unique[b], weight)
+		adjacency.Set(unique[b], unique[c], weight)
+	}
+	fmt.Println("loaded adjacency matrix")
+
+	var eig mat.Eigen
+	ok := eig.Factorize(adjacency, mat.EigenRight)
+	if !ok {
+		panic("Eigendecomposition failed")
+	}
+	fmt.Println("computed eigenvectors")
+	for i, value := range eig.Values(nil) {
+		fmt.Println(i, cmplx.Abs(value))
+	}
+	vectors := mat.CDense{}
+	eig.VectorsTo(&vectors)
+	wordVectors := make([][]float64, size)
+	for i := 0; i < size; i++ {
+		for j := 0; j < size; j++ {
+			wordVectors[i] = append(wordVectors[i], cmplx.Abs(vectors.At(i, j)))
+		}
+	}
+	return wordVectors
 }
