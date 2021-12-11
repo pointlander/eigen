@@ -5,16 +5,29 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"math"
 	"math/cmplx"
+	"math/rand"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/james-bowman/sparse"
 	"gonum.org/v1/gonum/mat"
+	"gonum.org/v1/plot"
+	"gonum.org/v1/plot/plotter"
+	"gonum.org/v1/plot/vg"
+	"gonum.org/v1/plot/vg/draw"
+
+	"github.com/pointlander/gradient/tf32"
+)
+
+var (
+	// Mode is the mode of the word vector algorithim
+	Mode = flag.String("mode", "gradient", "the mode")
 )
 
 func normalize(a string) string {
@@ -22,6 +35,8 @@ func normalize(a string) string {
 }
 
 func main() {
+	flag.Parse()
+
 	data, err := ioutil.ReadFile("84-0.txt")
 	if err != nil {
 		panic(err)
@@ -40,7 +55,15 @@ func main() {
 	size := len(unique)
 	fmt.Println(size)
 
-	wordVectors := gonum(words, unique)
+	var wordVectors [][]float64
+	if *Mode == "gradient" {
+		wordVectors = gradient(words, unique)
+	} else if *Mode == "gonum" {
+		wordVectors = gonum(words, unique)
+	} else {
+		flag.Usage()
+		return
+	}
 
 	type Word struct {
 		Key   string
@@ -86,8 +109,120 @@ func main() {
 	})
 
 	for _, word := range ranked {
-		fmt.Println(word.Key)
+		fmt.Println(word.Key, word.Rank)
 	}
+}
+
+func gradient(words []string, unique map[string]int) [][]float64 {
+	rand.Seed(1)
+
+	size := len(unique)
+
+	set := tf32.NewSet()
+	set.Add("A", size, size)
+	set.Add("X", size, size)
+	set.Add("L", size, size)
+
+	for i := range set.Weights[:2] {
+		w := set.Weights[i]
+		if w.S[1] == 1 {
+			for i := 0; i < cap(w.X); i++ {
+				w.X = append(w.X, 0)
+			}
+		} else {
+			factor := float32(math.Sqrt(2 / float64(w.S[0])))
+			for i := 0; i < cap(w.X); i++ {
+				w.X = append(w.X, float32(rand.NormFloat64())*factor)
+			}
+		}
+	}
+
+	set.Weights[2].X = set.Weights[2].X[:cap(set.Weights[2].X)]
+	factor := float32(math.Sqrt(2 / float64(set.Weights[2].S[0])))
+	for i := 0; i < size; i++ {
+		for j := 0; j < size; j++ {
+			if i == j {
+				set.Weights[2].X[i*size+j] = float32(rand.NormFloat64()) * factor
+			}
+		}
+	}
+
+	deltas := make([][]float32, 0, 8)
+	for _, p := range set.Weights {
+		deltas = append(deltas, make([]float32, len(p.X)))
+	}
+
+	l1 := tf32.Mul(set.Get("A"), set.Get("X"))
+	l2 := tf32.Mul(set.Get("L"), set.Get("X"))
+	cost := tf32.Avg(tf32.Quadratic(l1, l2))
+
+	alpha, eta, iterations := float32(.3), float32(.3), 1024
+	points := make(plotter.XYs, 0, iterations)
+	i := 0
+	for i < iterations {
+		total := float32(0.0)
+		set.Zero()
+
+		total += tf32.Gradient(cost).X[0]
+		sum := float32(0)
+		for _, p := range set.Weights {
+			for _, d := range p.D {
+				sum += d * d
+			}
+		}
+		norm := float32(math.Sqrt(float64(sum)))
+		scaling := float32(1)
+		if norm > 1 {
+			scaling = 1 / norm
+		}
+
+		for k, p := range set.Weights[:2] {
+			for l, d := range p.D {
+				deltas[k][l] = alpha*deltas[k][l] - eta*d*scaling
+				p.X[l] += deltas[k][l]
+			}
+		}
+		for i := 0; i < size; i++ {
+			for j := 0; j < size; j++ {
+				if i == j {
+					d := set.Weights[2].D[i*size+j]
+					deltas[2][i*size+j] = alpha*deltas[2][i*size+j] - eta*d*scaling
+					set.Weights[2].X[i*size+j] += deltas[2][i*size+j]
+				}
+			}
+		}
+
+		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
+		fmt.Println(i, total)
+		i++
+	}
+
+	p := plot.New()
+
+	p.Title.Text = "epochs vs cost"
+	p.X.Label.Text = "epochs"
+	p.Y.Label.Text = "cost"
+
+	scatter, err := plotter.NewScatter(points)
+	if err != nil {
+		panic(err)
+	}
+	scatter.GlyphStyle.Radius = vg.Length(1)
+	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
+	p.Add(scatter)
+
+	err = p.Save(8*vg.Inch, 8*vg.Inch, "cost.png")
+	if err != nil {
+		panic(err)
+	}
+
+	wordVectors := make([][]float64, size)
+	for i := 0; i < size; i++ {
+		for j := 0; j < size; j++ {
+			wordVectors[i] = append(wordVectors[i], float64(set.Weights[1].X[j*size+i]))
+		}
+	}
+	return wordVectors
 }
 
 func gonum(words []string, unique map[string]int) [][]float64 {
