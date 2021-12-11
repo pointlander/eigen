@@ -163,7 +163,7 @@ func gradient(words []string, unique map[string]int) [][]float64 {
 	}
 
 	l1 := tf32.Mul(set.Get("A"), set.Get("X"))
-	l2 := tf32.Mul(set.Get("L"), set.Get("X"))
+	l2 := set.Get("X") //tf32.Mul(set.Get("L"), set.Get("X"))
 	cost := tf32.Avg(tf32.Quadratic(l1, l2))
 
 	alpha, eta, iterations := float32(.3), float32(.3), 1024
