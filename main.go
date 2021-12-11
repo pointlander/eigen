@@ -123,22 +123,32 @@ func gradient(words []string, unique map[string]int) [][]float64 {
 	set.Add("X", size, size)
 	set.Add("L", size, size)
 
-	for i := range set.Weights[:2] {
-		w := set.Weights[i]
-		if w.S[1] == 1 {
-			for i := 0; i < cap(w.X); i++ {
-				w.X = append(w.X, 0)
-			}
-		} else {
-			factor := float32(math.Sqrt(2 / float64(w.S[0])))
-			for i := 0; i < cap(w.X); i++ {
-				w.X = append(w.X, float32(rand.NormFloat64())*factor)
-			}
-		}
+	set.Weights[0].X = set.Weights[0].X[:cap(set.Weights[0].X)]
+	for i := 1; i < len(words)-1; i++ {
+		a := normalize(words[i-1])
+		b := normalize(words[i])
+		c := normalize(words[i+1])
+
+		weight := set.Weights[0].X[unique[a]*size+unique[b]]
+		weight++
+		set.Weights[0].X[unique[a]*size+unique[b]] = weight
+		set.Weights[0].X[unique[b]*size+unique[a]] = weight
+
+		weight = set.Weights[0].X[unique[c]*size+unique[b]]
+		weight++
+		set.Weights[0].X[unique[c]*size+unique[b]] = weight
+		set.Weights[0].X[unique[b]*size+unique[c]] = weight
+	}
+	fmt.Println("loaded adjacency matrix")
+
+	w := set.Weights[1]
+	factor := float32(math.Sqrt(2 / float64(w.S[0])))
+	for i := 0; i < cap(w.X); i++ {
+		w.X = append(w.X, float32(rand.NormFloat64())*factor)
 	}
 
 	set.Weights[2].X = set.Weights[2].X[:cap(set.Weights[2].X)]
-	factor := float32(math.Sqrt(2 / float64(set.Weights[2].S[0])))
+	factor = float32(math.Sqrt(2 / float64(set.Weights[2].S[0])))
 	for i := 0; i < size; i++ {
 		for j := 0; j < size; j++ {
 			if i == j {
@@ -165,7 +175,7 @@ func gradient(words []string, unique map[string]int) [][]float64 {
 
 		total += tf32.Gradient(cost).X[0]
 		sum := float32(0)
-		for _, p := range set.Weights {
+		for _, p := range set.Weights[1:] {
 			for _, d := range p.D {
 				sum += d * d
 			}
@@ -176,11 +186,9 @@ func gradient(words []string, unique map[string]int) [][]float64 {
 			scaling = 1 / norm
 		}
 
-		for k, p := range set.Weights[:2] {
-			for l, d := range p.D {
-				deltas[k][l] = alpha*deltas[k][l] - eta*d*scaling
-				p.X[l] += deltas[k][l]
-			}
+		for l, d := range set.Weights[1].D {
+			deltas[1][l] = alpha*deltas[1][l] - eta*d*scaling
+			set.Weights[1].X[l] += deltas[1][l]
 		}
 		for i := 0; i < size; i++ {
 			for j := 0; j < size; j++ {
