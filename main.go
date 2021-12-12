@@ -56,7 +56,9 @@ func main() {
 	fmt.Println(size)
 
 	var wordVectors [][]float64
-	if *Mode == "gradient" {
+	if *Mode == "nonlinear" {
+		wordVectors = nonlinear(words, unique)
+	} else if *Mode == "gradient" {
 		wordVectors = gradient(words, unique)
 	} else if *Mode == "gonum" {
 		wordVectors = gonum(words, unique)
@@ -111,6 +113,105 @@ func main() {
 	for _, word := range ranked {
 		fmt.Println(word.Key, word.Rank)
 	}
+}
+
+func nonlinear(words []string, unique map[string]int) [][]float64 {
+	rand.Seed(1)
+
+	size := len(unique)
+
+	set := tf32.NewSet()
+	set.Add("A", size, size)
+	set.Add("X", size, size)
+
+	set.Weights[0].X = set.Weights[0].X[:cap(set.Weights[0].X)]
+	for i := 1; i < len(words)-1; i++ {
+		a := normalize(words[i-1])
+		b := normalize(words[i])
+		c := normalize(words[i+1])
+
+		weight := set.Weights[0].X[unique[a]*size+unique[b]]
+		weight++
+		set.Weights[0].X[unique[a]*size+unique[b]] = weight
+		set.Weights[0].X[unique[b]*size+unique[a]] = weight
+
+		weight = set.Weights[0].X[unique[c]*size+unique[b]]
+		weight++
+		set.Weights[0].X[unique[c]*size+unique[b]] = weight
+		set.Weights[0].X[unique[b]*size+unique[c]] = weight
+	}
+	fmt.Println("loaded adjacency matrix")
+
+	w := set.Weights[1]
+	factor := float32(math.Sqrt(2 / float64(w.S[0])))
+	for i := 0; i < cap(w.X); i++ {
+		w.X = append(w.X, float32(rand.NormFloat64())*factor)
+	}
+
+	deltas := make([][]float32, 0, 8)
+	for _, p := range set.Weights {
+		deltas = append(deltas, make([]float32, len(p.X)))
+	}
+
+	l1 := tf32.TanH(tf32.Mul(set.Get("A"), set.Get("X")))
+	cost := tf32.Avg(tf32.Quadratic(l1, set.Get("X")))
+
+	alpha, eta, iterations := float32(.3), float32(.3), 1024
+	points := make(plotter.XYs, 0, iterations)
+	i := 0
+	for i < iterations {
+		total := float32(0.0)
+		set.Zero()
+
+		total += tf32.Gradient(cost).X[0]
+		sum := float32(0)
+		for _, p := range set.Weights[1:] {
+			for _, d := range p.D {
+				sum += d * d
+			}
+		}
+		norm := float32(math.Sqrt(float64(sum)))
+		scaling := float32(1)
+		if norm > 1 {
+			scaling = 1 / norm
+		}
+
+		for l, d := range set.Weights[1].D {
+			deltas[1][l] = alpha*deltas[1][l] - eta*d*scaling
+			set.Weights[1].X[l] += deltas[1][l]
+		}
+
+		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
+		fmt.Println(i, total)
+		i++
+	}
+
+	p := plot.New()
+
+	p.Title.Text = "epochs vs cost"
+	p.X.Label.Text = "epochs"
+	p.Y.Label.Text = "cost"
+
+	scatter, err := plotter.NewScatter(points)
+	if err != nil {
+		panic(err)
+	}
+	scatter.GlyphStyle.Radius = vg.Length(1)
+	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
+	p.Add(scatter)
+
+	err = p.Save(8*vg.Inch, 8*vg.Inch, "cost.png")
+	if err != nil {
+		panic(err)
+	}
+
+	wordVectors := make([][]float64, size)
+	for i := 0; i < size; i++ {
+		for j := 0; j < size; j++ {
+			wordVectors[i] = append(wordVectors[i], float64(set.Weights[1].X[j*size+i]))
+		}
+	}
+	return wordVectors
 }
 
 func gradient(words []string, unique map[string]int) [][]float64 {
