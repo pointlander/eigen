@@ -226,8 +226,9 @@ func gradient(words []string, unique map[string]int) [][]float64 {
 
 	wordVectors := make([][]float64, size)
 	for i := 0; i < size; i++ {
+		l := float64(set.Weights[2].X[i*size+i])
 		for j := 0; j < size; j++ {
-			wordVectors[i] = append(wordVectors[i], float64(set.Weights[1].X[j*size+i]))
+			wordVectors[i] = append(wordVectors[i], l*float64(set.Weights[1].X[j*size+i]))
 		}
 	}
 	return wordVectors
@@ -259,7 +260,8 @@ func gonum(words []string, unique map[string]int) [][]float64 {
 		panic("Eigendecomposition failed")
 	}
 	fmt.Println("computed eigenvectors")
-	for i, value := range eig.Values(nil) {
+	values := eig.Values(nil)
+	for i, value := range values {
 		fmt.Println(i, cmplx.Abs(value))
 	}
 	vectors := mat.CDense{}
@@ -267,7 +269,7 @@ func gonum(words []string, unique map[string]int) [][]float64 {
 	wordVectors := make([][]float64, size)
 	for i := 0; i < size; i++ {
 		for j := 0; j < size; j++ {
-			wordVectors[i] = append(wordVectors[i], cmplx.Abs(vectors.At(i, j)))
+			wordVectors[i] = append(wordVectors[i], real(values[j])*cmplx.Abs(vectors.At(i, j)))
 		}
 	}
 	return wordVectors
