@@ -118,11 +118,11 @@ func main() {
 func nonlinear(words []string, unique map[string]int) [][]float64 {
 	rand.Seed(1)
 
-	size := len(unique)
+	size, width := len(unique), 200
 
 	set := tf32.NewSet()
 	set.Add("A", size, size)
-	set.Add("X", size, size)
+	set.Add("X", size, width)
 
 	set.Weights[0].X = set.Weights[0].X[:cap(set.Weights[0].X)]
 	for i := 1; i < len(words)-1; i++ {
@@ -207,7 +207,7 @@ func nonlinear(words []string, unique map[string]int) [][]float64 {
 
 	wordVectors := make([][]float64, size)
 	for i := 0; i < size; i++ {
-		for j := 0; j < size; j++ {
+		for j := 0; j < width; j++ {
 			wordVectors[i] = append(wordVectors[i], float64(set.Weights[1].X[j*size+i]))
 		}
 	}
